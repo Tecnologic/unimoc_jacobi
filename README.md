@@ -211,6 +211,22 @@ Other combinations that were considered:
 | 0.2 mΩ + A2 | ±160 A | same scaling, but 2.5× the offset in amps, and the A2 costs 1.60 € vs 0.25 € for a shunt |
 | 0.2 mΩ + A1 | ±400 A | coarse at light load (about 0.2 A noise) |
 
+### Running without a battery (pedal generator)
+
+A Jacobi with a hoverboard motor behind a gearbox on pedals (Drais) can
+start the cart with no battery, without a change to this board (checked
+2026-11-09; the firmware side is section 7.2 of the
+[system plan](https://github.com/Tecnologic/unimoc/blob/develop/docs/system_plan.md)):
+
+| | |
+|---|---|
+| Start-up | The switched-off bridge rectifies the back-EMF through the body diodes; the LM5008 runs from `+BATT` (J103 pin 1, operating range from 6 V, 9.5 V recommended), so every drive on the DC link boots from about 10 V |
+| Enable | `PWM_EN` needs 12 V on J501 pin 3: wire it from the DC link side through the key switch; the gate supply check needs +12P above 10 V |
+| Bulk capacitance | 6 × 56 µF + 3 × 10 µF ≈ 370 µF per board, milliseconds at 200 W: the drives must derate on undervoltage (firmware) |
+| Overvoltage | The generator shorts its motor through the low-side FETs above its setpoint; a trip would leave the body diodes charging the DC link. Gear the pedals for at most 45 V at the highest cadence |
+| Outside this board | A clamp or chopper that works without the BMS, extra bulk capacitance on the shared DC link if needed, a supply for the VDC and the pedal unit |
+| Bench check | Start-up on a slowly rising supply: if a sagging source makes the logic restart in a loop, add a start threshold on the LM5008 `RON/SD` pin |
+
 ## KiCad project
 
 The logic board and the power board are combined in a single **KiCad 10** project:
