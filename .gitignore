@@ -36,3 +36,4 @@ _autosave-*
 *.kicad_sym-bak
 *.kicad_pcb-bak
 .history/
+__pycache__/

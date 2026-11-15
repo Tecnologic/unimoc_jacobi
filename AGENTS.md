@@ -50,6 +50,14 @@ These rules apply to every schematic change, by humans and by agents.
   joined by standoffs through these holes. Move neighbouring parts instead. The
   locked N101 corner pads stay put as well.
 
+- **The 2×5 pairs J101/J103, J102/J104, J111/J110 must stay on top of each
+  other** (same y, 104.05 mm apart in x). They are locked.
+- **The layout is generated** by `scripts/layout/build.py` (placement, pours,
+  gate drive, own grid router). Change the scripts and run them again rather
+  than editing tracks by hand; check with `kicad-cli pcb drc --schematic-parity`
+  (no errors, no unconnected items) and write the production data again with
+  `scripts/layout/export.py`.
+
 ## Other
 
 - Datasheets go to `datasheets/`, footprints to `footprints/jacobi.pretty`.

@@ -49,7 +49,7 @@ PLACE = {
 def place(B: Board):
     for ref, (x, y, r) in PLACE.items():
         B.place(ref, x, y, r)
-    for ref in ('J101', 'J102', 'J111', 'H101', 'H102', 'H103'):
+    for ref in ('J101', 'J102', 'J111', 'H101', 'H102', 'H103', 'J103', 'J104', 'J110'):
         B.fp(ref).SetLocked(True)
 
 
