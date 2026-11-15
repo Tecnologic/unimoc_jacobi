@@ -2,7 +2,7 @@ import sys, time, json, os
 S = '/tmp/claude-0/-home-user/31ebc478-6d24-506f-aca2-18b9ec9b7a7d/scratchpad'
 sys.path.insert(0, S + '/tools')
 from kl import Board
-import power, power_route, logic
+import power, power_route, logic, finish
 what = sys.argv[1] if len(sys.argv) > 1 else 'all'
 FIRST = S + '/work/first.json'
 first = json.load(open(FIRST)) if os.path.exists(FIRST) else []
@@ -20,6 +20,7 @@ for it in range(int(sys.argv[2]) if len(sys.argv) > 2 else 1):
         if new:
             first = new + first
             json.dump(first, open(FIRST, 'w'))
+        finish.finish(B)
         B.fill()
     B.save(S + '/work/jacobi.kicad_pcb')
     if what == 'place' or not new:
