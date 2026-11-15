@@ -17,7 +17,8 @@ from kl import L
 G = 0.1
 TM = pcbnew.ToMM
 ALL = ['F', 'I1', 'I2', 'B']
-MARGIN = 0.06
+MARGIN = 0.07
+EXP = 0.04    # pads are rasterised slightly larger than they are
 SQ2 = math.sqrt(2.0)
 
 
@@ -37,6 +38,7 @@ class Router:
         self.noroute = {l: np.zeros((self.ny, self.nx), bool) for l in ALL}
         self.novia = np.zeros((self.ny, self.nx), bool)
         self.failed = []
+        self.padreg = []
         self._outline(edge)
         self._load()
 
@@ -63,8 +65,10 @@ class Router:
         a[clash] = -1
 
     def rect(self, layer, x0, y0, x1, y1, n):
-        i0, j0 = self.ij(x0 + G / 2 - 1e-6, y0 + G / 2 - 1e-6)
-        i1, j1 = self.ij(x1 - G / 2 + 1e-6, y1 - G / 2 + 1e-6)
+        i0 = int(math.ceil((x0 - EXP - self.x0) / G - 1e-6))
+        j0 = int(math.ceil((y0 - EXP - self.y0) / G - 1e-6))
+        i1 = int(math.floor((x1 + EXP - self.x0) / G + 1e-6))
+        j1 = int(math.floor((y1 + EXP - self.y0) / G + 1e-6))
         i0, j0, i1, j1 = self._clip(i0, j0, i1, j1)
         if i1 < i0 or j1 < j0:
             return None
@@ -139,6 +143,7 @@ class Router:
                 n = self.nid(name)
                 cx, cy = TM(p.GetPosition().x), TM(p.GetPosition().y)
                 circ = p.GetShape(pcbnew.F_Cu) == pcbnew.PAD_SHAPE_CIRCLE
+                self.padreg.append((n, [l for l in ALL if p.IsOnLayer(L[l])], (x0, y0, x1, y1), cx, cy))
                 for l in ALL:
                     if not p.IsOnLayer(L[l]):
                         continue
@@ -153,7 +158,7 @@ class Router:
                         self.hole[sl] |= m
                     if p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH:
                         for l in ALL:
-                            self.disk(l, cx, cy, dr, -1)
+                            self.disk(l, cx, cy, dr + 0.1, -1)
                 elif p.IsOnLayer(pcbnew.F_Cu) or p.IsOnLayer(pcbnew.B_Cu):
                     sl = self.rect(None, x0 - 0.1, y0 - 0.1, x1 + 0.1, y1 + 0.1, 0)
                     if sl is not None:
@@ -172,7 +177,7 @@ class Router:
                 continue
             o = z.Outline().Outline(0)
             pts = [(TM(o.CPoint(q).x), TM(o.CPoint(q).y)) for q in range(o.PointCount())]
-            m = self.poly_mask(pts)
+            m = ndimage.binary_dilation(self.poly_mask(pts), iterations=4)
             for l in ALL:
                 if z.IsOnLayer(L[l]) and z.GetDoNotAllowTracks():
                     self.noroute[l] |= m
@@ -192,8 +197,9 @@ class Router:
         other = (c != 0) & (c != n)
         d = ndimage.distance_transform_edt(~other) * G
         free = d >= clr + hw + MARGIN
-        free &= self.edge_dist >= self.edge + hw if hasattr(self, 'edge') else True
+        free &= self.edge_dist >= self.edge + hw
         free &= ~self.noroute[layer]
+        free |= (c == n) & (d >= clr + hw + MARGIN - 0.06)     # on own copper (pads that are off the grid)
         return free
 
     def via_map(self, n, clr):
@@ -274,7 +280,64 @@ class Router:
                         heapq.heappush(pq, (g2 + h[c], g2, k2))
         return None
 
-    def _emit(self, path, net, w, n):
+    def _elbow(self, a, b, diag_first):
+        (i0, j0), (i1, j1) = a, b
+        dx, dy = i1 - i0, j1 - j0
+        sx, sy = (dx > 0) - (dx < 0), (dy > 0) - (dy < 0)
+        nd = min(abs(dx), abs(dy))
+        ns = max(abs(dx), abs(dy)) - nd
+        st = (sx, 0) if abs(dx) > abs(dy) else (0, sy)
+        steps = [(sx, sy)] * nd + [st] * ns if diag_first else [st] * ns + [(sx, sy)] * nd
+        cells = []
+        i, j = i0, j0
+        for ddx, ddy in steps:
+            cells.append((i, j, ddx, ddy))
+            i += ddx
+            j += ddy
+        if nd and ns:
+            k = nd if diag_first else ns
+            corner = (i0 + sum(c[2] for c in cells[:k]), j0 + sum(c[3] for c in cells[:k]))
+        else:
+            corner = None
+        return cells, corner
+
+    def _smooth(self, run, fb):
+        """replace staircases by 45 degree elbows where the cells in between are free"""
+        nx = self.nx
+        pts = [(p[1], p[2]) for p in run]
+        out = [pts[0]]
+        a = 0
+        while a < len(pts) - 1:
+            hit = None
+            for b in range(min(len(pts) - 1, a + 250), a + 1, -1):
+                for df in (True, False):
+                    cells, corner = self._elbow(pts[a], pts[b], df)
+                    good = True
+                    for q, (i, j, dx, dy) in enumerate(cells):
+                        i2, j2 = i + dx, j + dy
+                        if q < len(cells) - 1 and not fb[j2 * nx + i2]:
+                            good = False
+                            break
+                        if dx and dy and not (fb[j * nx + i2] and fb[j2 * nx + i]):
+                            good = False
+                            break
+                    if good:
+                        hit = (b, corner)
+                        break
+                if hit:
+                    break
+            if hit:
+                b, corner = hit
+                if corner and corner != pts[a] and corner != pts[b]:
+                    out.append(corner)
+                out.append(pts[b])
+                a = b
+            else:
+                out.append(pts[a + 1])
+                a += 1
+        return out
+
+    def _emit(self, path, net, w, n, free=None):
         """path of node keys -> tracks/vias on the board and in the raster"""
         size = self.nx * self.ny
         pts = []
@@ -298,16 +361,67 @@ class Router:
             if len(run) < 2:
                 continue
             layer = self.layers[run[0][0]]
-            simp = [run[0]]
-            for q in range(1, len(run) - 1):
-                a, b, c = run[q - 1], run[q], run[q + 1]
-                if (b[1] - a[1], b[2] - a[2]) != (c[1] - b[1], c[2] - b[2]):
+            if free is not None:
+                pts = self._smooth(run, free[layer].tobytes())
+            else:
+                pts = [(p[1], p[2]) for p in run]
+            simp = [pts[0]]
+            for q in range(1, len(pts) - 1):
+                a, b, c = pts[q - 1], pts[q], pts[q + 1]
+                da, db = (b[0] - a[0], b[1] - a[1]), (c[0] - b[0], c[1] - b[1])
+                if da[0] * db[1] != da[1] * db[0] or da[0] * db[0] + da[1] * db[1] <= 0:
                     simp.append(b)
-            simp.append(run[-1])
-            xy = [self.xy(p[1], p[2]) for p in simp]
+            simp.append(pts[-1])
+            xy = [self.xy(p[0], p[1]) for p in simp]
+            for end in (0, -1):
+                c = self._pad_centre(n, layer, xy[end])
+                if c is not None:
+                    if end == 0:
+                        xy.insert(0, c)
+                    else:
+                        xy.append(c)
             self.B.track(net, layer, xy, w, lock=False)
             for (xa, ya), (xb, yb) in zip(xy, xy[1:]):
                 self.seg(layer, xa, ya, xb, yb, w / 2, n)
+
+    def _pad_centre(self, n, layer, pt):
+        x, y = pt
+        best = None
+        for pn, ls, (x0, y0, x1, y1), cx, cy in self.padreg:
+            if pn == n and layer in ls and x0 - 0.06 <= x <= x1 + 0.06 and y0 - 0.06 <= y <= y1 + 0.06:
+                d = math.hypot(cx - x, cy - y)
+                if d > 0.005 and (best is None or d < best[0]):
+                    best = (d, (cx, cy))
+        return best[1] if best else None
+
+    def manual(self, net, layer, pts, w=0.2):
+        n = self.nid(net)
+        self.B.track(net, layer, pts, w, lock=True)
+        for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
+            self.seg(layer, xa, ya, xb, yb, w / 2, n)
+
+    def manual_via(self, net, x, y):
+        self.B.via(net, x, y, self.via_d, self.via_drill)
+        self.add_via(x, y, self.via_d / 2, self.via_drill / 2, self.nid(net))
+
+    def escape(self, ref, length=0.6, w=0.2, only=None):
+        """straight stubs out of fine-pitch pads that do not sit on the routing grid"""
+        f = self.B.fp(ref)
+        fx, fy = TM(f.GetPosition().x), TM(f.GetPosition().y)
+        for p in f.Pads():
+            net = p.GetNetname()
+            if not net or net.startswith('unconnected') or (only and p.GetNumber() not in only):
+                continue
+            bb = p.GetBoundingBox()
+            x0, y0, x1, y1 = TM(bb.GetLeft()), TM(bb.GetTop()), TM(bb.GetRight()), TM(bb.GetBottom())
+            cx, cy = TM(p.GetPosition().x), TM(p.GetPosition().y)
+            layer = 'F' if p.IsOnLayer(pcbnew.F_Cu) else 'B'
+            if x1 - x0 >= y1 - y0:
+                ex = x1 + length if cx > fx else x0 - length
+                self.manual(net, layer, [(cx, cy), (ex, cy)], w)
+            else:
+                ey = y1 + length if cy > fy else y0 - length
+                self.manual(net, layer, [(cx, cy), (cx, ey)], w)
 
     def pad_cells(self, ref, num):
         """cells (per routing layer) that lie in the pads ref.num, plus exact centre"""
@@ -321,7 +435,7 @@ class Router:
             out.append((cx, cy, ls, (TM(bb.GetLeft()), TM(bb.GetTop()), TM(bb.GetRight()), TM(bb.GetBottom()))))
         return out
 
-    def route_net(self, net, w=0.15, clr=0.2, via_cost=25, pads=None, order=None, allow_via=True):
+    def route_net(self, net, w=0.15, clr=0.2, via_cost=25, pads=None, order=None, allow_via=True, via_mask=None):
         """connect all pads of the net (or the given (ref, num) list) into one tree"""
         n = self.nid(net)
         plist = []
@@ -336,6 +450,8 @@ class Router:
             plist = list(pads)
         free = {l: self.free_map(l, n, w / 2, clr) for l in self.layers}
         viaok = self.via_map(n, clr) if allow_via else None
+        if viaok is not None and via_mask is not None:
+            viaok &= via_mask
         own = {l: self.cop[l] == n for l in self.layers}
         # connected components of own copper: the tree starts from the first pad's component
         info = []
@@ -391,14 +507,12 @@ class Router:
             # nearest pad first
             todo.sort(key=lambda t: hmap[t[1][0][1], t[1][0][2]])
             key, cells = todo.pop(0)
-            for l in self.layers:
-                free[l] |= own[l]
             path = self._astar(free, viaok, cells, tree, hmap, via_cost)
             if path is None:
                 self.failed.append((net, key))
                 ok = False
                 continue
-            self._emit(path, net, w, n)
+            self._emit(path, net, w, n, free)
             own = {l: self.cop[l] == n for l in self.layers}
             grow(cells)
         return ok
@@ -423,7 +537,7 @@ class Router:
                     continue
                 plist.append((f.GetReference(), p.GetNumber()))
         for ref, num in plist:
-            free = {l: self.free_map(l, n, w / 2, clr) | (self.cop[l] == n) for l in self.layers}
+            free = {l: self.free_map(l, n, w / 2, clr) for l in self.layers}
             viaok = self.via_map(n, clr)
             if plane_mask is not None:
                 viaok &= plane_mask
@@ -444,7 +558,7 @@ class Router:
                 self.failed.append((net, (ref, num), 'fanout'))
                 continue
             if len(path) > 1:
-                self._emit(path, net, w, n)
+                self._emit(path, net, w, n, free)
             size = self.nx * self.ny
             li, c = divmod(path[-1], size)
             j, i = divmod(c, self.nx)
@@ -453,3 +567,84 @@ class Router:
             self.add_via(x, y, self.via_d / 2, self.via_drill / 2, n)
             done += 1
         return done
+
+    def join(self, net, ref, num, w=0.3, clr=0.2, via_cost=25):
+        """connect one pad to any other copper of its net (used when a fanout failed)"""
+        n = self.nid(net)
+        free = {l: self.free_map(l, n, w / 2, clr) for l in self.layers}
+        viaok = self.via_map(n, clr)
+        cells = []
+        for cx, cy, ls, bb in self.pad_cells(ref, num):
+            i, j = self.ij(cx, cy)
+            for l in ls:
+                cells.append((self.layers.index(l), j, i))
+        target = {}
+        anyt = np.zeros((self.ny, self.nx), bool)
+        for li, l in enumerate(self.layers):
+            own = self.cop[l] == n
+            lab, _ = ndimage.label(own, structure=np.ones((3, 3)))
+            mine = np.zeros_like(own)
+            for cli, j, i in cells:
+                if cli == li and lab[j, i]:
+                    mine |= lab == lab[j, i]
+            target[l] = own & ~mine
+            anyt |= target[l]
+        if not anyt.any():
+            self.failed.append((net, (ref, num), 'join'))
+            return False
+        hmap = ndimage.distance_transform_edt(~anyt)
+        path = self._astar(free, viaok, cells, target, hmap, via_cost)
+        if path is None:
+            self.failed.append((net, (ref, num), 'join'))
+            return False
+        self._emit(path, net, w, n, free)
+        return True
+
+
+def prune(board, xmin=-1e9, xmax=1e9):
+    """remove unlocked/locked track stubs that end nowhere (repeat until stable)"""
+    b = board.b
+    tm = pcbnew.ToMM
+    removed = 0
+    while True:
+        segs, vias = [], []
+        for t in b.GetTracks():
+            if t.GetClass() == 'PCB_VIA':
+                vias.append((tm(t.GetPosition().x), tm(t.GetPosition().y), t.GetNetname()))
+            else:
+                segs.append(t)
+        pads = []
+        for f in b.GetFootprints():
+            for p in f.Pads():
+                bb = p.GetBoundingBox()
+                pads.append((tm(bb.GetLeft()), tm(bb.GetTop()), tm(bb.GetRight()), tm(bb.GetBottom()), p.GetNetname(),
+                             p))
+        data = [(tm(t.GetStart().x), tm(t.GetStart().y), tm(t.GetEnd().x), tm(t.GetEnd().y), t.GetLayer(),
+                 t.GetNetname(), tm(t.GetWidth())) for t in segs]
+        kill = []
+        for k, t in enumerate(segs):
+            xa, ya, xb, yb, ly, net, w = data[k]
+            if not (xmin <= xa <= xmax):
+                continue
+            for (x, y) in ((xa, ya), (xb, yb)):
+                ok = any(n == net and math.hypot(vx - x, vy - y) < 0.25 for vx, vy, n in vias)
+                if not ok:
+                    ok = any(n == net and l - 0.02 <= x <= r + 0.02 and tp - 0.02 <= y <= bt + 0.02 and p.IsOnLayer(ly)
+                             for l, tp, r, bt, n, p in pads)
+                if not ok:
+                    for q, d in enumerate(data):
+                        if q != k and d[4] == ly and d[5] == net:
+                            dx, dy = d[2] - d[0], d[3] - d[1]
+                            l2 = dx * dx + dy * dy
+                            tt = 0 if l2 == 0 else max(0, min(1, ((x - d[0]) * dx + (y - d[1]) * dy) / l2))
+                            if math.hypot(x - d[0] - tt * dx, y - d[1] - tt * dy) < d[6] / 2 + w / 2:
+                                ok = True
+                                break
+                if not ok:
+                    kill.append(t)
+                    break
+        if not kill:
+            return removed
+        for t in kill:
+            b.Remove(t)
+        removed += len(kill)

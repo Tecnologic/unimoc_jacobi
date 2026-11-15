@@ -141,7 +141,7 @@ def power(B: Board):
 
     # bridge NTC pair out of the FET block (signal continues to J104 by the router)
     yn = 63.36 + PITCH
-    b.track('Net-(J104-Pin_8)', 'F', [(324.55, yn - 2.325), (324.55, yn - 4.01), (346.6, yn - 4.01)], 0.2)
+    b.track('Net-(J104-Pin_8)', 'F', [(324.55, yn - 2.325), (324.55, yn - 3.9), (347.6, yn - 3.9)], 0.2)
     b.track('GND', 'F', [(324.55, yn - 0.675), (323.65, yn - 1.4), (323.65, yn - 4.1), (324.05, yn - 4.5),
                          (346.6, yn - 4.5)], 0.2)
     # DC link divider feed
