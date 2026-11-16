@@ -404,6 +404,48 @@ class Router:
         for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
             self.seg(layer, xa, ya, xb, yb, w / 2, n)
 
+    def stitch(self, net, region, layers=('F', 'B'), clr=0.25, minw=0.5, pitch=8.0):
+        """ground vias so that every piece of the outer-layer pours hangs on the plane (nothing is left
+        as an island and removed) and large pieces are tied down every `pitch` mm"""
+        n = self.nid(net)
+        viaok = self.via_map(n, clr) & region
+        placed = 0
+        for l in layers:
+            c = self.cop[l]
+            other = (c != 0) & (c != n)
+            d = ndimage.distance_transform_edt(~other) * G
+            pour = (d >= clr + minw / 2) & region & self.inside
+            pour = ndimage.binary_dilation(ndimage.binary_erosion(pour, iterations=2), iterations=2) & pour
+            lab, cnt = ndimage.label(pour)
+            for k in range(1, cnt + 1):
+                comp = lab == k
+                if comp.sum() < 150:                 # smaller than 1.5 mm2: not worth a via
+                    continue
+                jj, ii = np.nonzero(comp & viaok)
+                if not len(jj):
+                    continue
+                anchored = (comp & (self.cop[l] == n) & self.hole).any()
+                # tiles of pitch x pitch: one via per tile that has room, the first tile always
+                seen = set()
+                order = np.argsort((jj // 1) * 0 + (ii % 7) + (jj % 5))
+                for q in order:
+                    t = (int(ii[q] * G // pitch), int(jj[q] * G // pitch))
+                    if t in seen:
+                        continue
+                    if anchored and len(seen) == 0 and comp.sum() < (pitch / G) ** 2:
+                        seen.add(t)
+                        break
+                    j, i = int(jj[q]), int(ii[q])
+                    if not viaok[j, i]:
+                        continue
+                    seen.add(t)
+                    x, y = self.xy(i, j)
+                    self.B.via(net, x, y, self.via_d, self.via_drill, lock=False)
+                    self.add_via(x, y, self.via_d / 2, self.via_drill / 2, n)
+                    viaok = self.via_map(n, clr) & region
+                    placed += 1
+        return placed
+
     def fill_poly(self, net, layer, pts):
         """a pour of the board script: copper of that net for the router"""
         n = self.nid(net)

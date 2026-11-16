@@ -164,7 +164,7 @@ def power(B: Board):
     # GNDPWR link to the upper right housing pad
     b.zone('GNDPWR', ['B'], rect(341.0, 59.3, 361.4, 60.7), prio=2, clr=0.3, name='GNDPWR corner link')
     # battery terminal
-    b.zone('+BATT', ['F'], rect(286.0, 72.9, 302.6, 81.3), prio=6, clr=PW, name='+BATT terminal F')
+    b.zone('+BATT', ['F'], rect(286.0, 72.9, 302.6, 84.3), prio=6, clr=PW, name='+BATT terminal F')
     b.zone('+BATT', ['B'], rect(289.0, 72.7, 313.9, 81.5), prio=6, clr=PW, name='+BATT terminal B')
     for i, (n, l, dyc, sy, term) in enumerate(CELLS):
         dy = PITCH * i

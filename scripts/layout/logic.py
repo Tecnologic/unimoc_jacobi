@@ -131,6 +131,8 @@ def route(B: Board, first=()):
     for net in ISON:
         R.route_net(net, w=0.3, clr=0.3, allow_via=False)
     R.keepout(ISO)
+    R.keepout(rect(214.9, 68.8, 218.5, 76.2), tracks=False)       # no vias in the copper-free areas
+    R.keepout(rect(235.6, 68.6, 237.6, 71.0), tracks=False)       # under the inductors
     # --- nets of the logic board
     nets = {}
     for f in b.GetFootprints():
@@ -214,5 +216,7 @@ def route(B: Board, first=()):
             w = 0.25
         R.hug = not mcu(nm) and nm not in fl      # bundle the long runs; the MCU escapes take the direct way
         R.route_net(nm, w=w, via_cost=30)
+    # --- ground vias: every piece of the top and bottom pours is tied to the plane
+    print('stitching vias', R.stitch('GNDD', outside), R.stitch('GNDA', core))
     zones(B)
     return R
