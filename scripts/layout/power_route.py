@@ -6,6 +6,7 @@ from power import CELLS, PITCH
 
 def route(B):
     R = Router(B, (284.3, 59.0, 368.3, 138.0), layers=('F', 'I1', 'B'))
+    R.hug = False
     # FET block and capacitor column: pours and scripted gate routing only
     R.keepout(rect(301.6, 59, 344.85, 138))
     # inner GND plane stays whole left of the analog part
@@ -27,6 +28,8 @@ def route(B):
         for s in 'HL':
             R.route_net(f'/power/PWM_{l}{s}', w=0.2)
     R.route_net('/power/V12P_SNS', w=0.2)
+    # gate driver supply: 1 mm trunk from the connector to the three drivers, then the small pads
+    R.route_net('+12P', w=1.0, via_cost=60, pads=[('J103', '5'), ('D301', '2'), ('D201', '2'), ('D401', '2')])
     R.route_net('+12P', w=0.5, via_cost=40)
     R.route_net('Net-(J104-Pin_8)', w=0.2)
     for net in ('/power/I_A', '/power/I_B', '/power/I_C', '/power/VSENSE_A', '/power/VSENSE_B',

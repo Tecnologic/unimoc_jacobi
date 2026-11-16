@@ -100,10 +100,11 @@ def power(B: Board):
         b.track(HO, 'I2', [(302.8, r0), (312.7, r0), (312.7, yg - 3.76), (330.0, yg - 3.76)], GW)
         b.track(HS, 'I2', [(302.0, r0 + 0.8), (311.85, r0 + 0.8), (311.85, yg - 2.96), (336.94, yg - 2.96)], GW)
         co = 0.4 if i == 0 else 0.0
-        b.track(LO, 'I1', [(303.7, r0 + 1.6), (311.0, r0 + 1.6), (311.0, yg - 1.7), (324.6, yg - 1.7),
-                           (324.6, ys + 3.3 + co)], GW)
-        b.track(VSS, 'I1', [(304.3, r0 + 2.4), (310.2, r0 + 2.4), (310.2, yg - 0.9), (326.0, yg - 0.9),
-                            (326.0, ys + 4.9 + co)], GW)
+        # the lanes end in a via each; the tracks start again there, so no chamfer cuts past the via
+        b.track(LO, 'I1', [(303.7, r0 + 1.6), (311.0, r0 + 1.6)], GW)
+        b.track(LO, 'I1', [(311.0, r0 + 1.6), (311.0, yg - 1.7), (324.6, yg - 1.7), (324.6, ys + 3.3 + co)], GW)
+        b.track(VSS, 'I1', [(304.3, r0 + 2.4), (310.2, r0 + 2.4)], GW)
+        b.track(VSS, 'I1', [(310.2, r0 + 2.4), (310.2, yg - 0.9), (326.0, yg - 0.9), (326.0, ys + 4.9 + co)], GW)
         for k in range(4):
             lanes.append((r0 + 0.8 * k, 301.5, 311.6))
         # --- low side column 1
@@ -198,6 +199,21 @@ def power(B: Board):
                 x, y, net = b.pad(f'C{n}{c:02d}', pn)
                 b.zone(net, ['F'], rect(303.3, y - 2.1, 308.75, y + 2.1), prio=4, clr=PW if net == '+BATT' else 0.3,
                        name=f'{net} C{n}{c:02d}')
+
+    # ---------------------------------------------------------- bottom solder mask open under the FETs
+    # bare (tinned) drain copper towards the cooling block; an insulating pad goes in between
+    import pcbnew
+    for i in range(3):
+        for cx in (X1, X2):
+            for yc in (66.2 + PITCH * i, 78.7 + PITCH * i):
+                sh = pcbnew.PCB_SHAPE(b.b)
+                sh.SetShape(pcbnew.SHAPE_T_RECTANGLE)
+                sh.SetStart(pcbnew.VECTOR2I(pcbnew.FromMM(cx - 4.3), pcbnew.FromMM(yc - 1.35)))
+                sh.SetEnd(pcbnew.VECTOR2I(pcbnew.FromMM(cx + 4.3), pcbnew.FromMM(yc + 5.3)))
+                sh.SetLayer(pcbnew.B_Mask)
+                sh.SetFilled(True)
+                sh.SetWidth(0)
+                b.b.Add(sh)
 
     # ---------------------------------------------------------- via fields
     ck = Checker(b)

@@ -12,7 +12,7 @@ import pcbnew
 from PIL import Image, ImageDraw
 from scipy import ndimage
 
-from kl import L
+from kl import L, chamfered
 
 G = 0.1
 TM = pcbnew.ToMM
@@ -38,6 +38,7 @@ class Router:
         self.noroute = {l: np.zeros((self.ny, self.nx), bool) for l in ALL}
         self.novia = np.zeros((self.ny, self.nx), bool)
         self.failed = []
+        self.hug = True
         self.padreg = []
         self._outline(edge)
         self._load()
@@ -218,7 +219,7 @@ class Router:
     edge = 0.5
 
     # ------------------------------------------------------------ search
-    def _astar(self, free, viaok, starts, target, hmap, via_cost, own=None):
+    def _astar(self, free, viaok, starts, target, hmap, via_cost, own=None, cost=None):
         """free: dict layer->bool array; starts: list of (li, j, i); target: dict layer->bool array"""
         nx, ny = self.nx, self.ny
         nl = len(self.layers)
@@ -227,6 +228,7 @@ class Router:
         tb = [target[l].tobytes() for l in self.layers]
         vb = viaok.tobytes() if viaok is not None else None
         h = hmap.ravel().tolist()
+        cm = [c.ravel().tolist() for c in cost] if cost is not None else None
         g = {}
         par = {}
         pq = []
@@ -263,7 +265,7 @@ class Router:
                 if w > 1.0 and not (fl[j * nx + ii] and fl[jj * nx + i]):
                     continue
                 k2 = li * size + c2
-                g2 = gc + w
+                g2 = gc + (w * cm[li][c2] if cm else w)
                 if g2 < g.get(k2, 1e18):
                     g[k2] = g2
                     par[k2] = k
@@ -374,21 +376,22 @@ class Router:
             simp.append(pts[-1])
             xy = [self.xy(p[0], p[1]) for p in simp]
             for end in (0, -1):
-                c = self._pad_centre(n, layer, xy[end])
+                c = self._pad_centre(n, layer, xy[end], w)
                 if c is not None:
                     if end == 0:
                         xy.insert(0, c)
                     else:
                         xy.append(c)
-            self.B.track(net, layer, xy, w, lock=False)
+            self.B.track(net, layer, xy, w, lock=False, chamfer=0)
             for (xa, ya), (xb, yb) in zip(xy, xy[1:]):
                 self.seg(layer, xa, ya, xb, yb, w / 2, n)
 
-    def _pad_centre(self, n, layer, pt):
+    def _pad_centre(self, n, layer, pt, w=0.2):
         x, y = pt
         best = None
         for pn, ls, (x0, y0, x1, y1), cx, cy in self.padreg:
-            if pn == n and layer in ls and x0 - 0.06 <= x <= x1 + 0.06 and y0 - 0.06 <= y <= y1 + 0.06:
+            if pn == n and layer in ls and x0 - 0.06 <= x <= x1 + 0.06 and y0 - 0.06 <= y <= y1 + 0.06 \
+                    and w <= min(x1 - x0, y1 - y0) + 0.06:
                 d = math.hypot(cx - x, cy - y)
                 if d > 0.005 and (best is None or d < best[0]):
                     best = (d, (cx, cy))
@@ -396,9 +399,17 @@ class Router:
 
     def manual(self, net, layer, pts, w=0.2):
         n = self.nid(net)
-        self.B.track(net, layer, pts, w, lock=True)
+        pts = chamfered(pts, 0.4)
+        self.B.track(net, layer, pts, w, lock=True, chamfer=0)
         for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
             self.seg(layer, xa, ya, xb, yb, w / 2, n)
+
+    def fill_poly(self, net, layer, pts):
+        """a pour of the board script: copper of that net for the router"""
+        n = self.nid(net)
+        m = self.poly_mask(pts)
+        c = self.cop[layer]
+        c[m & (c == 0)] = n
 
     def manual_via(self, net, x, y):
         self.B.via(net, x, y, self.via_d, self.via_drill)
@@ -507,7 +518,7 @@ class Router:
             # nearest pad first
             todo.sort(key=lambda t: hmap[t[1][0][1], t[1][0][2]])
             key, cells = todo.pop(0)
-            path = self._astar(free, viaok, cells, tree, hmap, via_cost)
+            path = self._astar(free, viaok, cells, tree, hmap, via_cost, cost=self.hug_cost() if self.hug else None)
             if path is None:
                 self.failed.append((net, key))
                 ok = False
@@ -516,6 +527,14 @@ class Router:
             own = {l: self.cop[l] == n for l in self.layers}
             grow(cells)
         return ok
+
+    def hug_cost(self, k=0.5, reach=1.2):
+        """per layer step cost: 1 next to existing copper, up to 1 + k in open areas"""
+        out = []
+        for l in self.layers:
+            d = ndimage.distance_transform_edt(self.cop[l] == 0) * G
+            out.append((1.0 + k * np.clip((d - 0.4) / reach, 0, 1)).astype(np.float32))
+        return out
 
     def hole_or_via(self, n):
         return self.hole

@@ -38,8 +38,9 @@ class Board:
                 return pcbnew.ToMM(p.GetPosition().x), pcbnew.ToMM(p.GetPosition().y), p.GetNetname()
         raise KeyError((ref, num))
 
-    def track(self, net, layer, pts, w=0.25, lock=True):
+    def track(self, net, layer, pts, w=0.25, lock=True, chamfer=0.4):
         n = self.net(net)
+        pts = chamfered(pts, chamfer) if chamfer else pts
         for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
             if abs(x1 - x2) < 1e-6 and abs(y1 - y2) < 1e-6:
                 continue
@@ -201,3 +202,25 @@ def grid(x0, x1, dx, y0, y1, dy):
         for j in range(ny + 1):
             pts.append((x0 + i * dx, y0 + j * dy))
     return pts
+
+
+def chamfered(pts, c):
+    """replace every corner sharper than 45 degrees by a 45 degree chamfer of leg c (shortened to fit)"""
+    import math
+    out = [pts[0]]
+    for a, b, d in zip(pts, pts[1:], pts[2:]):
+        v1 = (b[0] - a[0], b[1] - a[1])
+        v2 = (d[0] - b[0], d[1] - b[1])
+        l1, l2 = math.hypot(*v1), math.hypot(*v2)
+        if l1 < 1e-6 or l2 < 1e-6:
+            out.append(b)
+            continue
+        cos = (v1[0] * v2[0] + v1[1] * v2[1]) / (l1 * l2)
+        if cos > 0.5:              # 45 degree bend or less: keep
+            out.append(b)
+            continue
+        k = min(c, 0.45 * l1, 0.45 * l2)
+        out.append((b[0] - v1[0] / l1 * k, b[1] - v1[1] / l1 * k))
+        out.append((b[0] + v2[0] / l2 * k, b[1] + v2[1] / l2 * k))
+    out.append(pts[-1])
+    return out

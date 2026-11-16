@@ -31,8 +31,8 @@ FIRST = os.path.join(HERE, 'retry_first.json')
 
 
 def main():
-    passes = int(sys.argv[1]) if len(sys.argv) > 1 else 4
-    first = json.load(open(FIRST)) if os.path.exists(FIRST) else []
+    passes = int(sys.argv[1]) if len(sys.argv) > 1 else 8
+    count = json.load(open(FIRST)) if os.path.exists(FIRST) else {}
     with tempfile.TemporaryDirectory() as tmp:
         base = os.path.join(tmp, 'jacobi.kicad_pcb')
         with open(base, 'wb') as f:
@@ -44,19 +44,25 @@ def main():
             power.power(B)
             R = power_route.route(B)
             print('power board, not routed:', R.failed, flush=True)
+            # nets that failed most often go first
+            first = sorted(count, key=lambda n: -count[n])
             R2 = logic.route(B, first)
             print('logic board, not routed:', R2.failed, round(time.time() - t), 's', flush=True)
-            new = [f[0] for f in R2.failed if f[0] not in first and f[0] not in logic.PLANES]
-            if new:
-                first = new + first
-                json.dump(first, open(FIRST, 'w'), indent=1)
-                continue
+            bad = {f[0] for f in R2.failed if f[0] not in logic.PLANES}
+            if R2.failed or R.failed:
+                for n in bad:
+                    count[n] = count.get(n, 0) + 1
+                json.dump(count, open(FIRST, 'w'), indent=1, sort_keys=True)
+                if bad:
+                    continue
+            if os.environ.get('ROUTED'):          # keep the routed board to work on the silkscreen alone
+                B.save(os.environ['ROUTED'])
             finish.finish(B)
             B.fill()
             out = os.path.join(tmp, 'out.kicad_pcb')      # not in ROOT: saving would rewrite jacobi.kicad_pro
             B.save(out)
             shutil.copy(out, os.path.join(ROOT, 'jacobi.kicad_pcb'))
-            return 0
+            return 0 if not (R2.failed or R.failed) else 1
     return 1
 
 

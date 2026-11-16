@@ -1,1 +1,4 @@
-["Net-(J1103-Pin_3)"]
+{
+ "/logic/controller/mcu/AIN_VDC": 1,
+ "/logic/controller/mcu/\\RESET": 1
+}
