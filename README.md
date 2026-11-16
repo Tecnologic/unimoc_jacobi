@@ -243,9 +243,8 @@ and H102/H101/H103 (logic); H106 and the four housing pads of N101 screw the
 power board to the cooling block. None of these moved. The three 2×5 pairs
 J101/J103, J102/J104 and J111/J110 lie exactly on top of each other. J103 was
 moved on the power board (room for the battery terminal), so J101 on the logic
-board followed it to (187.37, 102.02). Bottom-side parts of the logic board are
-0603 capacitors and resistors only and none of them is above the electrolytic
-capacitors of the power board.
+board followed it to (187.37, 102.02). All parts of the logic board are on the
+top side; only the three board-to-board headers are on the bottom.
 
 **Power board, layers.**
 
@@ -262,8 +261,8 @@ capacitors of the power board.
 - Via fields (0.8 / 0.4 mm): about 15 per low-side FET source, 21 from each
   switch node to the shunt, 12 to 14 from the shunt to the phase terminal, 4 to 8
   per electrolytic capacitor pad. Pours of the power nets are 0.5 mm apart.
-- Gate drive: 0.5 mm tracks, each gate resistor next to its gate pin, the
-  gate/source pair of a FET on the same layer. The Kelvin net ties of the
+- Gate drive: 0.5 mm tracks with 45° corners, each gate resistor next to its
+  gate pin, the gate/source pair of a FET on the same layer. The Kelvin net ties of the
   high-side sources (R`x`04, R`x`10) sit on the source pins; those of the
   low side (R`x`06, R`x`08) sit at the end of the source strip and at the
   commutation capacitor, because the gate track blocks the way to the pins.
@@ -273,13 +272,34 @@ capacitors of the power board.
   shunt and the amplifier. The phase outputs cross the analog signals only on
   inner layer 1, in the analog ground plane.
 - Q401 moved by 0.34 mm onto the 26.4 mm cell pitch (it was off against Q403).
+- The PWM inputs and the +12P trunk on the left are routed by hand (commit
+  `59841ef`); the scripts take them from `scripts/layout/owner_tracks.json`.
+  The +12P trunk is 1 mm wide where the clearance allows it, like +12V on the
+  logic board.
+- The bottom solder mask is open under the twelve FETs (bare, tinned drain
+  copper towards the cooling block). An insulating pad has to sit in between.
 
 **Logic board, layers.** Top: parts and most signals. Inner 1: GNDD plane,
 GNDA island under the analog front end, the LDO and the analog connectors
 (joined only through FB502). Inner 2: +3V3 plane, +3.3VADC island. Bottom:
 signals, the board-to-board headers, MCU decoupling. Ground pours on top and
-bottom. Under the input side of the optocoupler U1102 (J501 pins 3/4, R1115,
+bottom, tied to the planes by stitching vias so that no piece is left as an
+island. Under the input side of the optocoupler U1102 (J501 pins 3/4, R1115,
 C1108, D1105) all four layers are free of pours (rule area `PWM_EN isolation`).
+
+- The function groups sit together: 12 V buck (LM5008) top left behind J501,
+  3.3 V buck right of the mounting hole, the +3.3VADC regulator below it next
+  to J601, CAN between J1103 and J1104, the PWM series resistors next to J101.
+- Both buck converters are routed with pours. Input capacitor, IC and diode
+  form the hot loop: at the LM5008, C501 and D501 sit directly below the IC
+  (VIN pad under pin 8, cathode under pin 1, both grounds next to each other,
+  about 6 × 5 mm); at the LMR12010, C504 is left of the IC and D505 below it.
+  Switch node, +12V and +3V3 are pours up to the inductors and output
+  capacitors.
+- +12V runs as a 1 mm trunk from the buck to J101 (the gate driver supply of
+  the power board); the short branches to small pads are 0.5 mm.
+- Each MCU supply pin pair has its 100 nF capacitor on the top side right at
+  the pins.
 
 - Edge connectors: left J501 (enable / battery), J1103 (CAN in), J1104 (CAN
   out), J602 (USB-C); right J601 (accelerator / brake, next to the +3.3VADC
@@ -297,12 +317,18 @@ layout, change the script and run it again (KiCad 10 Python with numpy, scipy
 and Pillow; the paths at the top of `build.py` point to a working copy), or
 edit the PCB in KiCad and accept that the script no longer reproduces it.
 
+**Silkscreen.** Designators only (1.0 mm), each next to its part; values and
+order numbers are on the fabrication layer. Connectors carry their function
+and, where there is room, the pin names. Both boards are marked
+`UNIMOC JACOBI rev 0.3`. A few designators in the densest spots have no room
+and are left out (the build prints them).
+
 **Before ordering, check on the bench or in KiCad:**
 
-- The bottom of the power board carries +BATT, the switch nodes and gate
-  signals in vias (tented) and the THT pins of the terminals J105–J109 stick
-  out. The cooling block needs an insulating pad or film and clearance for
-  those pins; solder mask alone is no insulation.
+- The bottom of the power board carries bare drain copper under the FETs
+  (+BATT and the switch nodes), gate signals in vias (tented) and the THT pins
+  of the terminals J105–J109 stick out. The cooling block needs the insulating
+  pad and clearance for those pins.
 - The height under the logic board (pin header and socket give about 11 mm)
   against the electrolytic capacitors (10.5 mm) and the terminal screws.
 - The 3D fit in the housing and the direction of the edge connectors.
