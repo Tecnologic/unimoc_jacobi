@@ -211,7 +211,7 @@ PC13–PC15, PD3–PD11, PD15, PE6–PE14, PH1.
   R1115 are reused for the PWM_EN optocoupler and its input resistor.
 - **New, still to draw:** quad comparator for the phase overcurrent, connector for an SPI angle sensor (SPI3), CAN STB.
 - **Layout:** LQFP100 (14 × 14 mm) instead of LQFP64; the logic board is laid
-  out again.
+  out again (rev 0.3, [README, PCB layout](../README.md#pcb-layout-rev-03)).
 
 ## 7. Checks
 
