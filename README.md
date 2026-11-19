@@ -318,17 +318,26 @@ layout, change the script and run it again (KiCad 10 Python with numpy, scipy
 and Pillow; the paths at the top of `build.py` point to a working copy), or
 edit the PCB in KiCad and accept that the script no longer reproduces it.
 
-**Silkscreen.** Designators only (1.0 mm), each next to its part; values and
-order numbers are on the fabrication layer. Connectors carry their function
-and, where there is room, the pin names. Both boards are marked
-`UNIMOC JACOBI` / `rev 0.3` in two lines. The bottom side of the logic board
-names every pin of the external connectors at the pin itself (BATT+, VIN
-LOGIC, PWM EN±, CAN GND/L/H, DCC/ACC, NTC, HALL A–C, +5V, SWD), so the
-harness can be soldered and checked from below
+**Silkscreen.** Designators only (1.0 mm); values and order numbers are on
+the fabrication layer. A designator stands right next to its part only where
+it cannot be read as belonging to a neighbour (in line with the part, nothing
+closer). Dense groups get a framed block of their designators beside them, in
+the same arrangement as the parts: the RC rows right of the MCU, the RC
+columns above it, the 12 V regulator, the Hall filters and two of the voltage
+dividers. On the power board every FET is labelled the same way: its two gate
+resistors in line with their rows, the FET name upright on the outer side of
+its column. Net ties carry no designator. Each connector carries its
+designator and function (`J501 ENABLE`, `J1103 CAN IN`, ...). Both boards are
+marked `UNIMOC JACOBI` / `rev 0.3` in two lines; the status LEDs sit next to
+the marking with their names (RUN, ERROR, FW, PWM). Pictures:
+[logic](docs/logic_silkscreen.png), [power](docs/power_silkscreen.png).
+
+The bottom side of the logic board names every pin of the external connectors
+at the pin itself (BATT+, VIN LOGIC, PWM EN±, CAN GND/L/H, DCC/ACC, NTC,
+HALL A–C, +5V, SWD), so the harness can be soldered and checked from below
 ([picture](docs/logic_board_bottom.png)). The board-to-board headers are not
 labelled there. The schematic order number `Part#` is copied into each
-footprint (hidden) for the BOM. A few designators in the densest spots have no room
-and are left out (the build prints them).
+footprint (hidden) for the BOM.
 
 **Before ordering, check on the bench or in KiCad:**
 
