@@ -2,7 +2,9 @@
 
 Every designator is put on a free spot next to its part: not on a pad, not
 under another part, not on other silkscreen and inside the board. Values and
-other footprint texts stay on the fabrication layer only.
+other footprint texts stay on the fabrication layer only. The bottom side of
+the logic board names every pin of the external connectors where the wires
+are soldered or plugged in (not the headers to the power board).
 """
 import math
 
@@ -23,9 +25,19 @@ LABEL = {   # connector -> what it is
     'J107': 'PHASE B', 'J108': 'PHASE C', 'J103': 'PWM', 'J104': 'ADC', 'J110': 'VSENSE',
 }
 PINS = {    # connector -> pin names
-    'J501': ['BAT', 'VIN', 'EN+', 'EN-'], 'J1103': ['SH', 'L', 'H', 'NC'], 'J1104': ['SH', 'L', 'H', 'NC'],
-    'J601': ['GND', 'BRK', 'ACC', '3V3'], 'J701': ['GND', 'NTC'], 'J1101': ['GND', 'A', 'B', 'C', '5V'],
+    'J501': ['BAT', 'VIN', 'EN+', 'EN-'], 'J1103': ['GND', 'L', 'H', 'NC'], 'J1104': ['GND', 'L', 'H', 'NC'],
+    'J601': ['GND', 'DCC', 'ACC', '3V3'], 'J701': ['GND', 'NTC'], 'J1101': ['GND', 'A', 'B', 'C', '5V'],
 }
+BOTTOM = {  # external connectors of the logic board, seen from the bottom: pin -> meaning
+    'J501': ['BATT+', 'VIN LOGIC', 'PWM EN+', 'PWM EN-'],
+    'J1103': ['CAN GND', 'CAN L', 'CAN H', 'NC'], 'J1104': ['CAN GND', 'CAN L', 'CAN H', 'NC'],
+    'J601': ['GND', 'DCC', 'ACC', '+3V3'], 'J701': ['GND', 'NTC'],
+    'J1101': ['GND', 'HALL A', 'HALL B', 'HALL C', '+5V'],
+}
+BOTTOM_LABEL = {'J501': 'ENABLE', 'J1103': 'CAN IN', 'J1104': 'CAN OUT', 'J601': 'AIN', 'J701': 'MOT NTC',
+                'J1101': 'HALL', 'J602': 'USB', 'P1101': 'SWD'}
+SWD = {'1': '3V3', '2': 'DIO', '3': 'GND', '4': 'CLK', '5': 'GND', '6': 'SWO', '10': 'RST'}
+LEDS = ('D1101', 'D1102', 'D1103', 'D1104')       # names (values) under the LEDs
 
 
 def ij(x, y):
@@ -33,8 +45,9 @@ def ij(x, y):
 
 
 class Silk:
-    def __init__(self, board):
+    def __init__(self, board, side='F'):
         self.b = board
+        self.side = side
         self.block = np.zeros((NY, NX), bool)
         self._outline()
         self._parts()
@@ -58,24 +71,30 @@ class Silk:
         self.block |= ~ndimage.binary_erosion(inside, iterations=8)      # 0.8 mm to the board edge
 
     def _parts(self):
+        bottom = self.side == 'B'
+        silk, mask = (pcbnew.B_SilkS, pcbnew.B_Mask) if bottom else (pcbnew.F_SilkS, pcbnew.F_Mask)
         for f in self.b.GetFootprints():
-            if f.IsFlipped():
-                # only the through holes of bottom-side parts matter on the top silkscreen
+            if f.IsFlipped() != bottom:
+                # only the through holes of parts on the other side matter
                 continue
-            cy = f.GetCourtyard(pcbnew.F_CrtYd)
+            cy = f.GetCourtyard(pcbnew.B_CrtYd if bottom else pcbnew.F_CrtYd)
             if cy.OutlineCount():
                 bb = cy.BBox()
                 self.box(TM(bb.GetLeft()), TM(bb.GetTop()), TM(bb.GetRight()), TM(bb.GetBottom()))
             for g in f.GraphicalItems():
-                if g.GetLayer() == pcbnew.F_SilkS:
+                if g.GetLayer() == silk:
                     bb = g.GetBoundingBox()
                     if TM(bb.GetWidth()) < 0.6 or TM(bb.GetHeight()) < 0.6 or g.GetClass() != 'PCB_SHAPE':
                         self.box(TM(bb.GetLeft()), TM(bb.GetTop()), TM(bb.GetRight()), TM(bb.GetBottom()), 0.1)
         for f in self.b.GetFootprints():
             for p in f.Pads():
-                if p.IsOnLayer(pcbnew.F_Mask) or p.GetDrillSize().x:
+                if p.IsOnLayer(mask) or p.GetDrillSize().x:
                     bb = p.GetBoundingBox()
                     self.box(TM(bb.GetLeft()), TM(bb.GetTop()), TM(bb.GetRight()), TM(bb.GetBottom()), 0.2)
+        for d in self.b.GetDrawings():       # fixed texts already on this side
+            if d.GetClass() == 'PCB_TEXT' and d.GetLayer() == silk:
+                bb = d.GetBoundingBox()
+                self.box(TM(bb.GetLeft()), TM(bb.GetTop()), TM(bb.GetRight()), TM(bb.GetBottom()), 0.1)
 
     def free(self, cx, cy, w, h):
         i0, j0 = ij(cx - w / 2, cy - h / 2)
@@ -130,28 +149,63 @@ def set_text(t, x, y, ang, h, thick):
     t.SetPosition(pcbnew.VECTOR2I(MM(float(x)), MM(float(y))))
 
 
-def add_text(b, text, x, y, ang, h, thick):
+def add_text(b, text, x, y, ang, h, thick, side='F'):
     t = pcbnew.PCB_TEXT(b)
     t.SetText(text)
-    t.SetLayer(pcbnew.F_SilkS)
+    t.SetLayer(pcbnew.B_SilkS if side == 'B' else pcbnew.F_SilkS)
     set_text(t, x, y, ang, h, thick)
+    if side == 'B':
+        t.SetMirrored(True)          # readable when the board is turned over
     b.Add(t)
+
+
+def part_numbers(b):
+    """copy the schematic field Part# (LCSC number) into the footprints, hidden"""
+    import os
+    import re
+    import subprocess
+    import tempfile
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    with tempfile.TemporaryDirectory() as tmp:
+        net = os.path.join(tmp, 'jacobi.net')
+        subprocess.run(['kicad-cli', 'sch', 'export', 'netlist', '--format', 'kicadsexpr', '-o', net,
+                        os.path.join(root, 'jacobi.kicad_sch')], check=True, capture_output=True)
+        text = open(net).read()
+    for comp in re.split(r'\(comp\s+(?=\(ref)', text)[1:]:
+        ref = re.search(r'\(ref "([^"]+)"\)', comp).group(1)
+        m = re.search(r'\(field\s*\(name "Part#"\)\s*(?:"([^"]*)")?', comp)
+        f = b.FindFootprintByReference(ref)
+        if m is None or f is None:
+            continue
+        f.SetField('Part#', m.group(1) or '')
+        for fld in f.GetFields():
+            if fld.GetName() == 'Part#':
+                fld.SetVisible(False)
+                fld.SetLayer(pcbnew.B_Fab if f.IsFlipped() else pcbnew.F_Fab)
 
 
 def finish(B):
     b = B.b
+    part_numbers(b)
     # old free texts go, the board marking comes back below
     for d in list(b.GetDrawings()):
         if d.GetClass() == 'PCB_TEXT' and d.GetLayer() in (pcbnew.F_SilkS, pcbnew.B_SilkS):
             b.Delete(d)
     S = Silk(b)
     # board marking first so that it gets its place
-    for text, x, y, h in (('UNIMOC JACOBI rev 0.3', 219.25, 134.4, 1.5), ('UNIMOC JACOBI', 353.0, 60.3, 1.0),
-                          ('rev 0.3', 353.0, 61.8, 1.0)):
+    for text, x, y, h in (('UNIMOC JACOBI', 208.0, 132.6, 1.5), ('rev 0.3', 208.0, 134.9, 1.5),
+                          ('UNIMOC JACOBI', 353.0, 60.3, 1.0), ('rev 0.3', 353.0, 61.8, 1.0)):
         w = len(text) * h * CHAR
         add_text(b, text, x, y, 0, h, 0.15 * h / 1.0 if h <= 1.0 else 0.25)
         S.box(x - w / 2, y - h * 0.65, x + w / 2, y + h * 0.65, 0.1)
     missing = []
+    # the LED names right under the LEDs
+    for r in LEDS:
+        f = b.FindFootprintByReference(r)
+        bb = f.GetCourtyard(pcbnew.F_CrtYd).BBox()
+        x, y = TM(f.GetPosition().x), TM(bb.GetBottom()) + 0.9
+        add_text(b, f.GetValue(), x, y, 0, 1.0, 0.15)
+        S.commit((x, y, 0), f.GetValue(), 1.0)
     # pin names first: they only make sense right next to their pin
     for r, names in PINS.items():
         f = b.FindFootprintByReference(r)
@@ -210,4 +264,52 @@ def finish(B):
                 break
         else:
             missing.append(r + ' label')
+    missing += bottom(b)
     print('silkscreen: no room for', missing)
+
+
+def bottom(b):
+    """pin names of the external connectors on the bottom side of the logic board"""
+    S = Silk(b, 'B')
+    missing = []
+    for r, names in BOTTOM.items():
+        f = b.FindFootprintByReference(r)
+        inward = 1 if TM(f.GetPosition().x) < 222 else -1
+        for p in f.Pads():
+            k = int(p.GetNumber()) - 1
+            px, py = TM(p.GetPosition().x), TM(p.GetPosition().y)
+            name = names[k]
+            pos = S.find(name, 1.0, (px, py), (px - 0.8, py - 0.8, px + 0.8, py + 0.8), 9.0, commit=False,
+                         prefer=lambda cx, cy: 2.0 * abs(cy - py) + (3.0 if (cx - px) * inward < 0 else 0.0))
+            if pos and abs(pos[1] - py) < 0.7 and pos[2] == 0:
+                S.commit(pos, name, 1.0)
+                add_text(b, name, pos[0], pos[1], 0, 1.0, 0.15, 'B')
+            else:
+                missing.append(f'{r}.{k + 1} bottom name')
+    # SWD: 1.27 mm pitch, the names stand upright in a column above and below the pins
+    f = b.FindFootprintByReference('P1101')
+    rows = sorted({round(TM(p.GetPosition().y), 2) for p in f.Pads()})
+    for p in f.Pads():
+        name = SWD.get(p.GetNumber())
+        if not name:
+            continue
+        px, py = TM(p.GetPosition().x), TM(p.GetPosition().y)
+        n = len(name) * CHAR
+        k = int(p.GetNumber())
+        off = 0.75 + n / 2 + (n + 0.4 if (k - 1) // 2 % 2 else 0.0)   # every other column staggered
+        y = py - off if py == rows[0] else py + off
+        add_text(b, name, px, y, 90, 1.0, 0.15, 'B')
+        S.box(px - 0.5, y - n / 2, px + 0.5, y + n / 2, 0.05)
+    for r, text in BOTTOM_LABEL.items():
+        f = b.FindFootprintByReference(r)
+        bb = f.GetCourtyard(pcbnew.F_CrtYd).BBox()
+        around = (TM(bb.GetLeft()), TM(bb.GetTop()), TM(bb.GetRight()), TM(bb.GetBottom()))
+        anchor = ((around[0] + around[2]) / 2, (around[1] + around[3]) / 2)
+        for h in (1.2, 1.0):
+            pos = S.find(text, h, anchor, around, 6.0)
+            if pos:
+                add_text(b, text, pos[0], pos[1], pos[2], h, 0.15 * h, 'B')
+                break
+        else:
+            missing.append(r + ' bottom label')
+    return missing

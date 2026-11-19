@@ -305,9 +305,10 @@ C1108, D1105) all four layers are free of pours (rule area `PWM_EN isolation`).
   out), J602 (USB-C); right J601 (accelerator / brake, next to the +3.3VADC
   LDO), J701 (motor temperature), J1101 (Hall).
 - Each analog input has its RC at the MCU pin: pins 32 to 36 above the MCU,
-  pins 15 to 25 right of it. The 20 MHz oscillator and the LEDs sit below
-  that, on GNDD.
-- The PWM series resistors R606–R611 sit on the bottom side next to J101.
+  pins 15 to 25 right of it. The 20 MHz oscillator sits below that, on GNDD.
+- The status LEDs (RUN, ERROR, FW, PWM) sit at the bottom edge next to the
+  board marking, 6 mm apart, each with its name below it.
+- The PWM series resistors R606–R611 sit on the top side next to J101.
 
 **How it is made.** The layout is generated: `scripts/layout/build.py` places
 the parts, draws the pours, via fields and the gate drive, and routes the
@@ -320,7 +321,13 @@ edit the PCB in KiCad and accept that the script no longer reproduces it.
 **Silkscreen.** Designators only (1.0 mm), each next to its part; values and
 order numbers are on the fabrication layer. Connectors carry their function
 and, where there is room, the pin names. Both boards are marked
-`UNIMOC JACOBI rev 0.3`. A few designators in the densest spots have no room
+`UNIMOC JACOBI` / `rev 0.3` in two lines. The bottom side of the logic board
+names every pin of the external connectors at the pin itself (BATT+, VIN
+LOGIC, PWM EN±, CAN GND/L/H, DCC/ACC, NTC, HALL A–C, +5V, SWD), so the
+harness can be soldered and checked from below
+([picture](docs/logic_board_bottom.png)). The board-to-board headers are not
+labelled there. The schematic order number `Part#` is copied into each
+footprint (hidden) for the BOM. A few designators in the densest spots have no room
 and are left out (the build prints them).
 
 **Before ordering, check on the bench or in KiCad:**
